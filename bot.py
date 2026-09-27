@@ -1,3 +1,4 @@
+# Version Auto-Trade Binance Futures Testnet
 import os
 import time
 import threading
