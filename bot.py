@@ -131,10 +131,10 @@ def get_market_data():
     return df
 
 def run_trading_bot():
-    print(f"🚀 Iniciando Bucle de Monitoreo (Auto-Trade Active) - Estrategia 3 (Scalping 5m) | {SYMBOL}", flush=True)
+    print("🚀 Bucle de Monitoreo Iniciado - Estrategia 3 (5m)", flush=True)
     init_leverage()
     
-    send_telegram_alert(f"🤖 *Bot Estrategia 3 (Scalping 5m Auto-Trade)* activo en Render.\n\n⚡ Las entradas se ejecutarán *automáticamente* en Binance Testnet.")
+    send_telegram_alert("🤖 Bot Estrategia 3 (Scalping 5m Auto-Trade) activo en Render.")
     
     last_processed_time = None
     
@@ -156,7 +156,7 @@ def run_trading_bot():
                 adx = last_closed['adx']
                 
                 timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(candle_time/1000))
-                print(f"[{timestamp_str} UTC] VELA 5M CERRADA | Precio: ${close_price:.2f} \vert{} EMA8:${ema_fast:.2f} | EMA21: ${ema_slow:.2f} \vert{} EMA200:${ema_200:.2f} | RSI: {rsi:.2f} | ADX: {adx:.1f}", flush=True)
+                print("VELA 5M CERRADA -> Precio:", close_price, "EMA8:", ema_fast, "EMA21:", ema_slow, "RSI:", rsi, "ADX:", adx, flush=True)
                 
                 if (close_price > ema_200) and (ema_fast > ema_slow) and (rsi > 55) and (volume > (vol_sma * 1.2)) and (adx > 20):
                     tp_price = close_price + (atr * 1.5)
@@ -200,12 +200,12 @@ def run_trading_bot():
                     if volume <= (vol_sma * 1.2): reasons.append("Volumen insuficiente")
                     if close_price <= ema_200 and ema_fast > ema_slow: reasons.append("Precio bajo EMA200")
                     if close_price >= ema_200 and ema_fast < ema_slow: reasons.append("Precio sobre EMA200")
-                    print(f"ℹ️ Sin entrada 5M. Motivo: {', '.join(reasons)}", flush=True)
+                    print("Sin entrada 5M. Motivo:", ", ".join(reasons), flush=True)
                     
                 last_processed_time = candle_time
                 
         except Exception as e:
-            print(f"❌ Error en el ciclo principal 5M: {e}", flush=True)
+            print("Error en el ciclo principal 5M:", e, flush=True)
             time.sleep(120)
             continue
             
