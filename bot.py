@@ -26,7 +26,7 @@ client = Client(API_KEY, API_SECRET, testnet=True)
 SYMBOL = "BTCUSDT"
 TIMEFRAME = Client.KLINE_INTERVAL_5MINUTE
 LEVERAGE = 10  # Apalancamiento 10x
-INITIAL_CAPITAL = 500  # Capital en USD para cálculo de tamaño
+INITIAL_CAPITAL = 500  # Capital en USD
 
 def send_telegram_alert(message):
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
@@ -50,11 +50,9 @@ def init_leverage():
 
 def execute_binance_trade(side, close_price, tp_price, sl_price):
     try:
-        # 1. Calcular la cantidad de BTC basada en $500 USD x 10 = $5000 notional
         notional_value = INITIAL_CAPITAL * LEVERAGE
         quantity = round(notional_value / close_price, 3)
         
-        # 2. Enviar Orden de Mercado
         order = client.futures_create_order(
             symbol=SYMBOL,
             side=side,
@@ -63,7 +61,6 @@ def execute_binance_trade(side, close_price, tp_price, sl_price):
         )
         print(f"✅ Orden de Mercado Ejecutada en Binance: {side} {quantity} BTC", flush=True)
         
-        # 3. Enviar Take Profit
         tp_side = 'SELL' if side == 'BUY' else 'BUY'
         client.futures_create_order(
             symbol=SYMBOL,
@@ -73,7 +70,6 @@ def execute_binance_trade(side, close_price, tp_price, sl_price):
             closePosition=True
         )
         
-        # 4. Enviar Stop Loss
         client.futures_create_order(
             symbol=SYMBOL,
             side=tp_side,
@@ -161,12 +157,10 @@ def run_trading_bot():
                 timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(candle_time/1000))
                 print(f"[{timestamp_str} UTC] VELA 5M CERRADA | Precio: ${close_price:.2f} \vert{} EMA8:${ema_fast:.2f} | EMA21: ${ema_slow:.2f} \vert{} EMA200:${ema_200:.2f} | RSI: {rsi:.2f} | ADX: {adx:.1f}", flush=True)
                 
-                # CONDICIÓN LONG
                 if (close_price > ema_200) and (ema_fast > ema_slow) and (rsi > 55) and (volume > (vol_sma * 1.2)) and (adx > 20):
                     tp_price = close_price + (atr * 1.5)
                     sl_price = close_price - (atr * 1.0)
                     
-                    # Ejecutar en Binance Testnet
                     exec_status = execute_binance_trade('BUY', close_price, tp_price, sl_price)
                     
                     msg = (
@@ -181,12 +175,10 @@ def run_trading_bot():
                     print(msg, flush=True)
                     send_telegram_alert(msg)
                     
-                # CONDICIÓN SHORT
                 elif (close_price < ema_200) and (ema_fast < ema_slow) and (rsi < 45) and (volume > (vol_sma * 1.2)) and (adx > 20):
                     tp_price = close_price - (atr * 1.5)
                     sl_price = close_price + (atr * 1.0)
                     
-                    # Ejecutar en Binance Testnet
                     exec_status = execute_binance_trade('SELL', close_price, tp_price, sl_price)
                     
                     msg = (
