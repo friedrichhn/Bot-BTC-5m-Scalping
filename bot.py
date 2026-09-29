@@ -1,4 +1,4 @@
-# Version Auto-Trade Binance Futures Testnet - Scalping 5m
+# Versión Auto-trade Binance Futures Testnet - Bot-BTC-5m-Scalping (Con Control de Posición Única)
 import os
 import time
 import threading
@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return "Bot Estrategia 3 (Scalping 5m Autotrade) Operativo", 200
+    return "Bot-BTC-5m-Scalping Operativo", 200
 
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
@@ -21,9 +21,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 client = Client(API_KEY, API_SECRET, testnet=True)
 SYMBOL = "BTCUSDT"
-TIMEFRAME = Client.KLINE_INTERVAL_5MINUTE
+TIMEFRAME = Client.KLINE_INTERVAL_5MINUTE  # Temporalidad correcta de 5 minutos
 LEVERAGE = 10
-INITIAL_CAPITAL = 500  # Capital en USD
+INITIAL_CAPITAL = 350  # Capital asignado en USDT
 
 def send_telegram_alert(message):
     if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
@@ -41,28 +41,52 @@ def send_telegram_alert(message):
 def init_leverage():
     try:
         client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-        print(f"⚙️ [Estrategia 3 - 5m] Apalancamiento configurado a {LEVERAGE}x en {SYMBOL}", flush=True)
+        print(f"⚙️ [Bot-BTC-5m-Scalping] Apalancamiento configurado a {LEVERAGE}x en {SYMBOL}", flush=True)
     except Exception as e:
-        print(f"⚠️ [Estrategia 3 - 5m] Error configurando apalancamiento: {e}", flush=True)
+        print(f"⚠️ [Bot-BTC-5m-Scalping] Error configurando apalancamiento: {e}", flush=True)
+
+def has_open_position():
+    """Verifica si ya hay una posición abierta o órdenes pendientes de protección en Binance."""
+    try:
+        # 1. Revisar si hay contratos abiertos
+        positions = client.futures_position_information(symbol=SYMBOL)
+        for pos in positions:
+            if float(pos['positionAmt']) != 0.0:
+                return True
+        
+        # 2. Revisar si hay órdenes pendientes (TP / SL activos)
+        open_orders = client.futures_get_open_orders(symbol=SYMBOL)
+        if len(open_orders) > 0:
+            return True
+            
+        return False
+    except Exception as e:
+        print(f"⚠️ Error consultando posición actual en Binance (Bot-BTC-5m-Scalping): {e}", flush=True)
+        return True
 
 def execute_binance_trade(side, close_price, tp_price, sl_price):
     try:
+        # Validación estricta de posición única
+        if has_open_position():
+            print("🛡️ [Protección Bot-BTC-5m-Scalping] Ya existe una posición u órdenes abiertas. Se bloquea la entrada.", flush=True)
+            return None
+
         notional_value = INITIAL_CAPITAL * LEVERAGE
         quantity = round(notional_value / close_price, 3)
         
         # 1. Orden de Mercado Principal
-        order = client.futures_create_order(
+        client.futures_create_order(
             symbol=SYMBOL,
             side=side,
             type='MARKET',
             quantity=quantity
         )
-        print(f"✅ Orden de Mercado Ejecutada en Binance: {side} {quantity} BTC", flush=True)
+        print(f"✅ [Bot-BTC-5m-Scalping] Orden de Scalping Ejecutada en Binance: {side} {quantity} BTC", flush=True)
         
         # Dirección opuesta para cerrar la posición
         tp_side = 'SELL' if side == 'BUY' else 'BUY'
         
-        # 2. Take Profit con cantidad explícita (sin closePosition)
+        # 2. Take Profit
         client.futures_create_order(
             symbol=SYMBOL,
             side=tp_side,
@@ -71,7 +95,7 @@ def execute_binance_trade(side, close_price, tp_price, sl_price):
             quantity=quantity
         )
         
-        # 3. Stop Loss con cantidad explícita (sin closePosition)
+        # 3. Stop Loss
         client.futures_create_order(
             symbol=SYMBOL,
             side=tp_side,
@@ -80,15 +104,15 @@ def execute_binance_trade(side, close_price, tp_price, sl_price):
             quantity=quantity
         )
         
-        return f"🚀 *ORDEN EJECUTADA EN BINANCE TESTNET*\nCantidad: `{quantity} BTC` (${notional_value} Notional)"
+        return f"🚀 *BOT-BTC-5M-SCALPING - ORDEN EJECUTADA*\nCantidad: `{quantity} BTC` (${notional_value} Notional)"
     
     except Exception as e:
-        err_msg = f"❌ Error ejecutando orden en Binance: {e}"
+        err_msg = f"❌ Error ejecutando orden de Scalping en Binance: {e}"
         print(err_msg, flush=True)
-        return f"⚠️ *Error al ejecutar en Binance:* {e}"
+        return f"⚠️ *Error al ejecutar Scalping:* {e}"
 
 def get_market_data():
-    klines = client.futures_klines(symbol=SYMBOL, interval=TIMEFRAME, limit=200)
+    klines = client.futures_klines(symbol=SYMBOL, interval=TIMEFRAME, limit=100)
     df = pd.DataFrame(klines, columns=[
         'timestamp', 'open', 'high', 'low', 'close', 'volume',
         'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -97,15 +121,14 @@ def get_market_data():
     df['close'] = df['close'].astype(float)
     df['high'] = df['high'].astype(float)
     df['low'] = df['low'].astype(float)
-    df['volume'] = df['volume'].astype(float)
     
-    df['ema8'] = df['close'].ewm(span=8, adjust=False).mean()
+    # Indicadores rápidos para Scalping en 5m (EMAs rápidas + RSI)
+    df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
     
     delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(window=9).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=9).mean()
     rs = gain / loss
     df['rsi'] = 100 - (100 / (1 + rs))
     
@@ -118,23 +141,12 @@ def get_market_data():
     )
     df['atr'] = df['tr'].rolling(window=14).mean()
     
-    up_move = df['high'] - df['high'].shift(1)
-    down_move = df['low'].shift(1) - df['low']
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
-    plus_di = 100 * (pd.Series(plus_dm).rolling(14).mean() / df['atr'])
-    minus_di = 100 * (pd.Series(minus_dm).rolling(14).mean() / df['atr'])
-    dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di))
-    df['adx'] = dx.rolling(14).mean()
-    
-    df['vol_ma'] = df['volume'].rolling(window=20).mean()
-    
     return df
 
 def run_trading_bot():
-    print("🚀 Bucle de Monitoreo Iniciado - Estrategia 3 (Scalping 5m)", flush=True)
+    print("🚀 Bucle de Monitoreo Iniciado - Bot-BTC-5m-Scalping", flush=True)
     init_leverage()
-    send_telegram_alert("🤖 Bot Estrategia 3 (Scalping 5m Auto-Trade) activo en Render.")
+    send_telegram_alert("🤖 Bot-BTC-5m-Scalping (con Control de Posición) activo.")
     
     last_processed_time = None
     
@@ -146,75 +158,64 @@ def run_trading_bot():
             
             if candle_time != last_processed_time:
                 close_price = last_closed['close']
-                ema8 = last_closed['ema8']
+                ema9 = last_closed['ema9']
                 ema21 = last_closed['ema21']
-                ema200 = last_closed['ema200']
                 rsi = last_closed['rsi']
-                adx = last_closed['adx']
                 atr = last_closed['atr']
-                volume = last_closed['volume']
-                vol_ma = last_closed['vol_ma']
                 
-                print("VELA 5M CERRADA -> Precio:", close_price, "EMA8:", ema8, "EMA21:", ema21, "ADX:", adx, "RSI:", rsi, flush=True)
+                print(f"VELA 5M CERRADA -> Precio: {close_price}, EMA9: {ema9:.2f}, EMA21: {ema21:.2f}, RSI: {rsi:.1f}", flush=True)
                 
-                if (close_price > ema200) and (ema8 > ema21) and (adx > 20) and (volume > vol_ma * 1.2) and (rsi > 55):
-                    tp_price = close_price + (atr * 1.5)
-                    sl_price = close_price - (atr * 1.0)
-                    exec_status = execute_binance_trade('BUY', close_price, tp_price, sl_price)
-                    
-                    msg = (
-                        f"🟢 *SEÑAL LONG SCALPING DETECTADA (10x)*\n\n"
-                        f"*Estrategia:* 3 (Scalping 5m)\n"
-                        f"*Par:* {SYMBOL}\n"
-                        f"*Capital Posición:* ${INITIAL_CAPITAL} USD (${INITIAL_CAPITAL * LEVERAGE} Notional)\n"
-                        f"*Precio Entrada:* ${close_price:.2f}\n"
-                        f"*Take Profit:* ${tp_price:.2f}\n"
-                        f"*Stop Loss:* ${sl_price:.2f}\n"
-                        f"*Filtro Trend:* Precio > EMA200 (${ema200:.2f})\n"
-                        f"*ADX:* {adx:.1f} | *RSI:* {rsi:.1f}\n\n"
-                        f"{exec_status}"
-                    )
-                    print(msg, flush=True)
-                    send_telegram_alert(msg)
-                    
-                elif (close_price < ema200) and (ema8 < ema21) and (adx > 20) and (volume > vol_ma * 1.2) and (rsi < 45):
-                    tp_price = close_price - (atr * 1.5)
-                    sl_price = close_price + (atr * 1.0)
-                    exec_status = execute_binance_trade('SELL', close_price, tp_price, sl_price)
-                    
-                    msg = (
-                        f"🔴 *SEÑAL SHORT SCALPING DETECTADA (10x)*\n\n"
-                        f"*Estrategia:* 3 (Scalping 5m)\n"
-                        f"*Par:* {SYMBOL}\n"
-                        f"*Capital Posición:* ${INITIAL_CAPITAL} USD (${INITIAL_CAPITAL * LEVERAGE} Notional)\n"
-                        f"*Precio Entrada:* ${close_price:.2f}\n"
-                        f"*Take Profit:* ${tp_price:.2f}\n"
-                        f"*Stop Loss:* ${sl_price:.2f}\n"
-                        f"*Filtro Trend:* Precio < EMA200 (${ema200:.2f})\n"
-                        f"*ADX:* {adx:.1f} | *RSI:* {rsi:.1f}\n\n"
-                        f"{exec_status}"
-                    )
-                    print(msg, flush=True)
-                    send_telegram_alert(msg)
-                    
+                # Validación estricta de posición única
+                if has_open_position():
+                    print("⏳ Posición u órdenes activas en Bot-BTC-5m-Scalping. Esperando el cierre del ciclo...", flush=True)
                 else:
-                    reasons = []
-                    if close_price <= ema200 and close_price >= ema200: reasons.append("Precio cruzando o sobre EMA200")
-                    if ema8 <= ema21 and ema8 >= ema21: reasons.append("EMAs sin cruce claro")
-                    if adx <= 20: reasons.append(f"ADX bajo ({adx:.1f} <= 20)")
-                    if volume <= vol_ma * 1.2: reasons.append("Volumen insuficiente")
-                    if close_price > ema200 and rsi <= 55: reasons.append(f"RSI bajo para Long ({rsi:.1f})")
-                    if close_price < ema200 and rsi >= 45: reasons.append(f"RSI alto para Short ({rsi:.1f})")
-                    print("Sin entrada 5M. Motivo:", ", ".join(reasons), flush=True)
+                    # Regla de Scalping Long en 5m
+                    if (ema9 > ema21) and (rsi > 50) and (rsi < 65):
+                        tp_price = close_price + (atr * 1.5)
+                        sl_price = close_price - (atr * 0.9)
+                        exec_status = execute_binance_trade('BUY', close_price, tp_price, sl_price)
+                        
+                        if exec_status:
+                            msg = (
+                                f"🟢 *BOT-BTC-5M-SCALPING - LONG (10x)*\n\n"
+                                f"*Par:* {SYMBOL} (5m)\n"
+                                f"*Precio Entrada:* ${close_price:.2f}\n"
+                                f"*Take Profit:* ${tp_price:.2f}\n"
+                                f"*Stop Loss:* ${sl_price:.2f}\n\n"
+                                f"{exec_status}"
+                            )
+                            print(msg, flush=True)
+                            send_telegram_alert(msg)
+                        
+                    # Regla de Scalping Short en 5m
+                    elif (ema9 < ema21) and (rsi < 50) and (rsi > 35):
+                        tp_price = close_price - (atr * 1.5)
+                        sl_price = close_price + (atr * 0.9)
+                        exec_status = execute_binance_trade('SELL', close_price, tp_price, sl_price)
+                        
+                        if exec_status:
+                            msg = (
+                                f"🔴 *BOT-BTC-5M-SCALPING - SHORT (10x)*\n\n"
+                                f"*Par:* {SYMBOL} (5m)\n"
+                                f"*Precio Entrada:* ${close_price:.2f}\n"
+                                f"*Take Profit:* ${tp_price:.2f}\n"
+                                f"*Stop Loss:* ${sl_price:.2f}\n\n"
+                                f"{exec_status}"
+                            )
+                            print(msg, flush=True)
+                            send_telegram_alert(msg)
+                        
+                    else:
+                        print("Sin condiciones óptimas en la vela de 5m.", flush=True)
                     
                 last_processed_time = candle_time
                 
         except Exception as e:
-            print("Error en ciclo 5M:", e, flush=True)
-            time.sleep(60)
+            print("Error en ciclo de Bot-BTC-5m-Scalping:", e, flush=True)
+            time.sleep(120)
             continue
             
-        time.sleep(15)
+        time.sleep(30)
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
